@@ -2929,6 +2929,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
   import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-analytics.js";
+  import { getDatabase, ref, set, get, child } form "https://www.gstatic.com/firebasejs/12.1.0/firebase-analytics.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyAyLQXKADNg0MfVtuiZvr42SBGOrQzVZuI",
@@ -2943,18 +2944,25 @@
   cost app = initializeApp(firebaseConfig);
   const db = getDatabase(app);
 
+  function saveMaterials() {
+    set(ref(db, "materials"), materials);
+  }
+
+  function saveHistory() {
+    set(ref(db, "history"), history);
+  }
+
   async function loadData() {
     const dbRef = ref(db);
-    const snapshot = await get(child(dbRef, 'materials'));
-    const historySnap = await get(child(dbRef, 'history'));
 
+    const snapshot = await get(child(dbRef, 'materials'));
     if (snapshot.exists()) {
         materials = snapshot.val();
     } else {
         materials = [...initialMaterials];
         saveMaterials();
     }
-
+    const historySnap = await get(child(dbRef, 'history'));
     if (historySnap.exists()) {
         history = snapshot.val();
     } else {
@@ -2964,14 +2972,6 @@
 
     renderMaterials();
     updateAllStats();
-   }
-
-   function saveMaterials() {
-    set(ref(db, 'materials'), materials);
-   }
-
-   function saveHistory() {
-    set(ref(db, 'history'), history);
    }
 
    document.addEventListener('DOMContentLoaded', loadData);
