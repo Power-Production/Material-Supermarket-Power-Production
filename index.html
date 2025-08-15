@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Material Management - Sistem Manajemen Material Supermarket</title>
+    <title>Material Supermarket - Sistem Manajemen Material Supermarket</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -225,6 +225,18 @@
                 </div>
             </div>
         </div>
+
+        <!-- Testing Firebase - TAMBAHKAN INI -->
+            <div class="flex space-x-2 mb-4">
+                <button onclick="manualSaveToFirebase()" class="btn btn-outline btn-hover">
+                <i data-lucide="save" class="w-4 h-4 mr-2"></i>
+                Manual Save Firebase
+                </button>
+            <button onclick="manualLoadFromFirebase()" class="btn btn-outline btn-hover">
+                <i data-lucide="download" class="w-4 h-4 mr-2"></i>
+                Manual Load Firebase
+            </button>
+            </div>
 
         <!-- Main Content Tabs (5 Tabs) -->
         <div class="space-y-6">
@@ -755,7 +767,6 @@
                             </button>
                         </div>
                         
-                        <button onclick="resetADGIFilters()" class="btn btn-outline">Reset</button>
                     </div>
                 </div>
 
@@ -1162,6 +1173,9 @@
             setupEventListeners();
             startClock();
             loadUniversityLogos();
+            
+            // ✅ TAMBAHAN: Start auto-save
+            startAutoSave();
             
             console.log('✅ App initialized successfully');
         });
@@ -1752,31 +1766,40 @@
             return Array.from(materialsMap.values());
         }
 
-        function updateADGIStatus(materialId, status) {
+        async function updateADGIStatus(materialId, status) {
             // Find all entries for this material and update them
-            const materialEntries = history.filter(entry => 
-                entry.action === 'take' && entry.materialId === materialId
-            );
+        const materialEntries = history.filter(entry => 
+            entry.action === 'take' && entry.materialId === materialId
+        );
 
-            history = history.map(entry => {
-                if (entry.action === 'take' && entry.materialId === materialId) {
-                    return {
-                        ...entry,
-                        adgiStatus: status,
-                        adgiUpdatedAt: new Date(),
-                        adgiUpdatedBy: 'Current User'
-                    };
-                }
+        history = history.map(entry => {
+            if (entry.action === 'take' && entry.materialId === materialId) {
+                return {
+                ...entry,
+                adgiStatus: status,
+                adgiUpdatedAt: new Date(),
+                adgiUpdatedBy: 'Current User'
+                };
+            }
                 return entry;
-            });
+        });
 
-            updateAllStats();
-            updateADGIDisplay();
-            
-            const entriesCount = materialEntries.length;
-            const entryText = entriesCount === 1 ? 'entry' : 'entries';
-            showToast(`✅ Status ADGI untuk ${materialId} (${entriesCount} ${entryText}) diperbarui menjadi ${status === 'done' ? 'Done' : 'Pending'}`, 'success');
+        // ✅ TAMBAHAN: Simpan ke Firebase
+            try {
+                await persistAll();
+                console.log('✅ ADGI status update saved to Firebase');
+            } catch (error) {
+                console.error('❌ Error saving ADGI update to Firebase:', error);
+                showToast('⚠️ Status update tersimpan local, sync ke Firebase gagal', 'warning');
         }
+
+        updateAllStats();
+        updateADGIDisplay();
+    
+        const entriesCount = materialEntries.length;
+        const entryText = entriesCount === 1 ? 'entry' : 'entries';
+            showToast(`✅ Status ADGI untuk ${materialId} (${entriesCount} ${entryText}) diperbarui menjadi ${status === 'done' ? 'Done' : 'Pending'}`, 'success');
+    }
 
         function resetADGIFilters() {
             document.getElementById('adgi-search').value = '';
@@ -1950,13 +1973,13 @@
             document.getElementById('confirmation-modal').classList.add('active');
         }
 
-        function confirmTakeMaterial() {
+        async function confirmTakeMaterial() {
             if (!selectedMaterial || !selectedBin) return;
 
             const quantity = parseInt(document.getElementById('take-quantity-input').value) || 0;
             const binKey = `bin${selectedBin}`;
             const currentBinValue = selectedMaterial[binKey];
-            
+    
             if (currentBinValue < quantity) {
                 showToast(`❌ Stok tidak mencukupi. Tersedia: ${currentBinValue}`, 'error');
                 return;
@@ -1971,35 +1994,45 @@
             // Update material data
             selectedMaterial[binKey] = Math.max(0, selectedMaterial[binKey] - quantity);
 
+
             // Add to history with ADGI status
-            const historyEntry = {
-                id: `take-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                materialId: selectedMaterial.id,
-                materialDescription: selectedMaterial.description,
-                action: 'take',
-                binNumber: selectedBin,
-                quantity: quantity,
-                timestamp: new Date(),
-                user: 'Current User',
-                adgiStatus: 'pending', // New take actions start as pending
-                adgiUpdatedAt: new Date(),
-                adgiUpdatedBy: 'System'
-            };
-            history.unshift(historyEntry);
+    const historyEntry = {
+        id: `take-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        materialId: selectedMaterial.id,
+        materialDescription: selectedMaterial.description,
+        action: 'take',
+        binNumber: selectedBin,
+        quantity: quantity,
+        timestamp: new Date(),
+        user: 'Current User',
+        adgiStatus: 'pending', // New take actions start as pending
+        adgiUpdatedAt: new Date(),
+        adgiUpdatedBy: 'System'
+    };
+    history.unshift(historyEntry);
 
-            // Update UI
-            updateAllStats();
-            renderMaterials();
-            closeTakeModal();
-
-            // Show success message
-            showToast(`✅ Berhasil mengambil ${quantity} ${selectedMaterial.description} dari BIN ${selectedBin}`, 'success');
-
-            // Auto-sync if enabled
-            if (autoExportEnabled) {
-                performAutoSync();
-            }
+        // ✅ TAMBAHAN: Simpan ke Firebase
+        try {
+        await persistAll();
+        console.log('✅ Data berhasil disimpan ke Firebase');
+        } catch (error) {
+        console.error('❌ Error saving to Firebase:', error);
+        showToast('⚠️ Data disimpan local, sync ke Firebase gagal', 'warning');
         }
+
+        // Update UI
+        updateAllStats();
+        renderMaterials();
+        closeTakeModal();
+
+        // Show success message
+        showToast(`✅ Berhasil mengambil ${quantity} ${selectedMaterial.description} dari BIN ${selectedBin}`, 'success');
+
+        // Auto-sync if enabled (redundant karena sudah ada persistAll di atas)
+        if (autoExportEnabled) {
+            performAutoSync();
+        }
+    }
 
         function closeTakeModal() {
             document.getElementById('take-modal').classList.remove('active');
@@ -2164,47 +2197,56 @@
             document.getElementById('confirmation-modal').classList.add('active');
         }
 
-        function confirmFillMaterial() {
-            if (!selectedMaterial || !selectedBin) return;
+        async function confirmFillMaterial() {
+    if (!selectedMaterial || !selectedBin) return;
 
-            const quantity = parseInt(document.getElementById('fill-quantity-input').value) || 0;
-            const current = selectedMaterial[`bin${selectedBin}`];
-            
-            if (current + quantity > selectedMaterial.qtyPerBin) {
-                showToast('❌ Kapasitas bin tidak mencukupi', 'error');
-                return;
-            }
+    const quantity = parseInt(document.getElementById('fill-quantity-input').value) || 0;
+    const current = selectedMaterial[`bin${selectedBin}`];
+    
+    if (current + quantity > selectedMaterial.qtyPerBin) {
+        showToast('❌ Kapasitas bin tidak mencukupi', 'error');
+        return;
+    }
 
-            // Update material data
-            const binKey = `bin${selectedBin}`;
-            selectedMaterial[binKey] = current + quantity;
+    // Update material data
+    const binKey = `bin${selectedBin}`;
+    selectedMaterial[binKey] = current + quantity;
 
-            // Add to history (fill actions don't need ADGI status)
-            const historyEntry = {
-                id: `fill-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                materialId: selectedMaterial.id,
-                materialDescription: selectedMaterial.description,
-                action: 'fill',
-                binNumber: selectedBin,
-                quantity: quantity,
-                timestamp: new Date(),
-                user: 'Current User'
-            };
-            history.unshift(historyEntry);
+    // Add to history (fill actions don't need ADGI status)
+    const historyEntry = {
+        id: `fill-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        materialId: selectedMaterial.id,
+        materialDescription: selectedMaterial.description,
+        action: 'fill',
+        binNumber: selectedBin,
+        quantity: quantity,
+        timestamp: new Date(),
+        user: 'Current User'
+    };
+    history.unshift(historyEntry);
 
-            // Update UI
-            updateAllStats();
-            renderMaterials();
-            closeFillModal();
+        // ✅ TAMBAHAN: Simpan ke Firebase
+        try {
+            await persistAll();
+            console.log('✅ Data berhasil disimpan ke Firebase');
+        } catch (error) {
+            console.error('❌ Error saving to Firebase:', error);
+            showToast('⚠️ Data disimpan local, sync ke Firebase gagal', 'warning');
+        }   
 
-            // Show success message
-            showToast(`✅ Berhasil mengisi ${quantity} ${selectedMaterial.description} ke BIN ${selectedBin}`, 'success');
+        // Update UI
+        updateAllStats();
+        renderMaterials();
+        closeFillModal();
 
-            // Auto-sync if enabled
+        // Show success message
+        showToast(`✅ Berhasil mengisi ${quantity} ${selectedMaterial.description} ke BIN ${selectedBin}`, 'success');
+
+        // Auto-sync if enabled (redundant karena sudah ada persistAll di atas)
             if (autoExportEnabled) {
                 performAutoSync();
             }
-        }
+    }
 
         function closeFillModal() {
             document.getElementById('fill-modal').classList.remove('active');
@@ -2400,58 +2442,68 @@
 
         function handleFileImport(event) {
             const file = event.target.files?.[0];
-            if (file) {
-                const reader = new FileReader();
+                if (file) {
+            const reader = new FileReader();
+        
+        reader.onload = async (e) => {  // ✅ TAMBAHAN: async
+            try {
+                const data = new Uint8Array(e.target?.result);
+                const workbook = XLSX.read(data, { type: 'array' });
                 
-                reader.onload = (e) => {
-                    try {
-                        const data = new Uint8Array(e.target?.result);
-                        const workbook = XLSX.read(data, { type: 'array' });
+                const materialSheetName = workbook.SheetNames.find(name => 
+                    name.toLowerCase().includes('material') || name.toLowerCase().includes('stock') || name.toLowerCase().includes('template')
+                );
+                
+                if (materialSheetName) {
+                    const worksheet = workbook.Sheets[materialSheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                    
+                    const importedMaterials = jsonData.map((row) => ({
+                        id: row['ID SAP'] || '',
+                        description: row['DESKRIPSI MATERIAL'] || row['Deskripsi'] || '',
+                        qtyPerBin: row['KAPASITAS/BIN'] || row['Kapasitas Per Bin'] || 0,
+                        bin1: row['BIN 1'] || 0,
+                        bin2: row['BIN 2'] || 0,
+                        bin3: row['BIN 3'] || 0,
+                        bin4: row['BIN 4'] || 0
+                    })).filter(material => material.id);
+                    
+                    if (importedMaterials.length > 0) {
+                        materials = importedMaterials;
                         
-                        const materialSheetName = workbook.SheetNames.find(name => 
-                            name.toLowerCase().includes('material') || name.toLowerCase().includes('stock') || name.toLowerCase().includes('template')
-                        );
-                        
-                        if (materialSheetName) {
-                            const worksheet = workbook.Sheets[materialSheetName];
-                            const jsonData = XLSX.utils.sheet_to_json(worksheet);
-                            
-                            const importedMaterials = jsonData.map((row) => ({
-                                id: row['ID SAP'] || '',
-                                description: row['DESKRIPSI MATERIAL'] || row['Deskripsi'] || '',
-                                qtyPerBin: row['KAPASITAS/BIN'] || row['Kapasitas Per Bin'] || 0,
-                                bin1: row['BIN 1'] || 0,
-                                bin2: row['BIN 2'] || 0,
-                                bin3: row['BIN 3'] || 0,
-                                bin4: row['BIN 4'] || 0
-                            })).filter(material => material.id);
-                            
-                            if (importedMaterials.length > 0) {
-                                materials = importedMaterials;
-                                updateAllStats();
-                                renderMaterials();
-                                showToast(`✅ ${importedMaterials.length} material berhasil diimpor dari Excel`, 'success');
-                                
-                                // Trigger auto-sync after import if enabled
-                                if (autoExportEnabled) {
-                                    setTimeout(() => performAutoSync(), 1000);
-                                }
-                            } else {
-                                showToast('⚠️ Tidak ada data material yang valid untuk diimpor', 'warning');
-                            }
-                        } else {
-                            showToast('❌ Sheet material tidak ditemukan dalam file Excel', 'error');
+                        // ✅ TAMBAHAN: Simpan ke Firebase
+                        try {
+                            await persistAll();
+                            console.log('✅ Imported materials saved to Firebase');
+                        } catch (error) {
+                            console.error('❌ Error saving imported materials to Firebase:', error);
+                            showToast('⚠️ Data impor tersimpan local, sync ke Firebase gagal', 'warning');
                         }
-                    } catch (error) {
-                        console.error('Import error:', error);
-                        showToast('❌ Gagal mengimpor data dari Excel', 'error');
+
+                        updateAllStats();
+                        renderMaterials();
+                        showToast(`✅ ${importedMaterials.length} material berhasil diimpor dari Excel`, 'success');
+                        
+                        // Trigger auto-sync after import if enabled (redundant karena sudah ada persistAll)
+                        // if (autoExportEnabled) {
+                        //     setTimeout(() => performAutoSync(), 1000);
+                        // }
+                    } else {
+                        showToast('⚠️ Tidak ada data material yang valid untuk diimpor', 'warning');
                     }
-                };
-                
-                reader.readAsArrayBuffer(file);
+                } else {
+                    showToast('❌ Sheet material tidak ditemukan dalam file Excel', 'error');
+                }
+            } catch (error) {
+                console.error('Import error:', error);
+                showToast('❌ Gagal mengimpor data dari Excel', 'error');
             }
-            event.target.value = '';
-        }
+        };
+        
+        reader.readAsArrayBuffer(file);
+    }
+    event.target.value = '';
+}
 
         function toggleAutoSync() {
             autoExportEnabled = !autoExportEnabled;
@@ -2508,6 +2560,51 @@
                 document.getElementById('last-sync-time').textContent = lastExportTime.toLocaleString('id-ID');
                 document.getElementById('last-sync-info').classList.remove('hidden');
             }
+        }
+
+        // ✅ TAMBAHAN FUNGSI: Manual save untuk testing
+        async function manualSaveToFirebase() {
+            try {
+                showToast('💾 Saving data to Firebase...', 'info');
+                await persistAll();
+                showToast('✅ Data berhasil disimpan ke Firebase!', 'success');
+            } catch (error) {
+                console.error('Manual save error:', error);
+                showToast('❌ Gagal menyimpan data ke Firebase', 'error');
+            }
+        }
+
+        // ✅ TAMBAHAN FUNGSI: Manual load untuk testing
+        async function manualLoadFromFirebase() {
+            try {
+                showToast('📥 Loading data from Firebase...', 'info');
+                await loadData();
+                showToast('✅ Data berhasil dimuat dari Firebase!', 'success');
+            } catch (error) {
+                console.error('Manual load error:', error);
+                showToast('❌ Gagal memuat data dari Firebase', 'error');
+            }
+        }
+
+        // ✅ TAMBAHAN: Auto-save interval (opsional)
+        function startAutoSave() {
+            // Auto-save setiap 30 detik
+            setInterval(async () => {
+                try {
+                    await persistAll();
+                    console.log('🔄 Auto-save successful');
+                    
+                    // Update sync badge
+                    const syncBadge = document.getElementById('sync-badge');
+                    const syncText = document.getElementById('sync-text');
+                    if (syncBadge && syncText) {
+                        syncBadge.classList.remove('hidden');
+                        syncText.textContent = `Auto-sync: ${new Date().toLocaleTimeString('id-ID')}`;
+                    }
+                } catch (error) {
+                    console.error('🔄 Auto-save failed:', error);
+                }
+            }, 30000); // 30 seconds
         }
 
         // Toast system
@@ -2929,11 +3026,12 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
   import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-analytics.js";
-  import { getDatabase, ref, set, get, child } form "https://www.gstatic.com/firebasejs/12.1.0/firebase-analytics.js";
+  import { getDatabase, ref, set, get, child, onValue, push, update } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-database.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyAyLQXKADNg0MfVtuiZvr42SBGOrQzVZuI",
     authDomain: "material-supermarket-daf.firebaseapp.com",
+    databaseURL: "https://material-supermarket-daf-default-rtdb.asia-southeast1.firebasedatabase.app/",
     projectId: "material-supermarket-daf",
     storageBucket: "material-supermarket-daf.firebasestorage.app",
     messagingSenderId: "838447526199",
@@ -2941,40 +3039,149 @@
     measurementId: "G-MP973YDY33"
   };
 
-  cost app = initializeApp(firebaseConfig);
+  const app = initializeApp(firebaseConfig);
   const db = getDatabase(app);
-
-  function saveMaterials() {
-    set(ref(db, "materials"), materials);
+  
+  // Inisialisasi variabel global jika belum ada
+  if (typeof materials === 'undefined') {
+    window.materials = [];
+  }
+  if (typeof history === 'undefined') {
+    window.history = [];
   }
 
-  function saveHistory() {
-    set(ref(db, "history"), history);
+  // Fungsi untuk menyimpan materials
+  function saveMaterials() { 
+    return set(ref(db, "materials"), materials); 
   }
 
+  // Fungsi untuk menyimpan history
+  function saveHistory() { 
+    return set(ref(db, "history"), history.map(h => ({
+      ...h,
+      timestamp: h.timestamp instanceof Date ? h.timestamp.getTime() : h.timestamp
+    }))); 
+  }
+
+  // Fungsi untuk load data dari Firebase
   async function loadData() {
-    const dbRef = ref(db);
+    try {
+      const dbRef = ref(db);
 
-    const snapshot = await get(child(dbRef, 'materials'));
-    if (snapshot.exists()) {
-        materials = snapshot.val();
-    } else {
-        materials = [...initialMaterials];
-        saveMaterials();
-    }
-    const historySnap = await get(child(dbRef, 'history'));
-    if (historySnap.exists()) {
-        history = snapshot.val();
-    } else {
+      // Load materials
+      const matSnap = await get(child(dbRef, "materials"));
+      if (matSnap.exists()) {
+        materials = matSnap.val();
+        console.log("Materials loaded from Firebase:", materials);
+      } else {
+        // Jika tidak ada data, gunakan initialMaterials jika tersedia
+        if (typeof initialMaterials !== 'undefined') {
+          materials = [...initialMaterials];
+          await saveMaterials();
+          console.log("Initial materials saved to Firebase");
+        } else {
+          materials = [];
+        }
+      }
+
+      // Load history - HAPUS DUPLIKASI
+      const historySnap = await get(child(dbRef, "history"));
+      if (historySnap.exists()) {
+        history = historySnap.val().map(e => ({
+          ...e,
+          timestamp: new Date(e.timestamp) // kembalikan ke Date untuk UI
+        }));
+        console.log("History loaded from Firebase:", history);
+      } else {
         history = [];
-        saveHistory();
+        await saveHistory();
+        console.log("Empty history saved to Firebase");
+      }
+
+      // Update UI setelah data loaded
+      if (typeof renderMaterials === 'function') renderMaterials();
+      if (typeof updateAllStats === 'function') updateAllStats();
+      
+      console.log("Data loaded successfully from Firebase");
+      
+    } catch (error) {
+      console.error("Error loading data from Firebase:", error);
+      
+      // Fallback ke localStorage jika Firebase error
+      try {
+        const localData = localStorage.getItem("materialMS:v1");
+        if (localData) {
+          const parsed = JSON.parse(localData);
+          materials = parsed.materials || [];
+          history = (parsed.history || []).map(h => ({
+            ...h,
+            timestamp: new Date(h.timestamp)
+          }));
+          console.log("Loaded from localStorage as fallback");
+          
+          if (typeof renderMaterials === 'function') renderMaterials();
+          if (typeof updateAllStats === 'function') updateAllStats();
+        }
+      } catch (localError) {
+        console.error("Error loading from localStorage:", localError);
+      }
     }
+  }
 
-    renderMaterials();
-    updateAllStats();
-   }
+  // Event listener untuk DOM loaded
+  document.addEventListener('DOMContentLoaded', function() {
+    console.log("DOM loaded, starting data load...");
+    loadData();
+  });
 
-   document.addEventListener('DOMContentLoaded', loadData);
+  // Fungsi untuk persist semua data
+  async function persistAll() {
+    try {
+      // Simpan ke Firebase
+      await Promise.all([saveMaterials(), saveHistory()]);
+      
+      // Simpan ke localStorage sebagai backup
+      localStorage.setItem("materialMS:v1", JSON.stringify({
+        materials, 
+        history: history.map(h => ({
+          ...h, 
+          timestamp: (h.timestamp instanceof Date ? h.timestamp.getTime() : h.timestamp)
+        }))
+      }));
+      
+      console.log("Data persisted successfully to Firebase and localStorage");
+    } catch (e) {
+      console.error("Persist error:", e);
+      
+      // Jika Firebase gagal, setidaknya simpan ke localStorage
+      try {
+        localStorage.setItem("materialMS:v1", JSON.stringify({
+          materials, 
+          history: history.map(h => ({
+            ...h, 
+            timestamp: (h.timestamp instanceof Date ? h.timestamp.getTime() : h.timestamp)
+          }))
+        }));
+        console.log("Data saved to localStorage as fallback");
+      } catch (localError) {
+        console.error("Even localStorage failed:", localError);
+      }
+    }
+  }
+
+  // Simpan otomatis setiap ada perubahan (opsional)
+  window.addEventListener('beforeunload', function() {
+    // Simpan data sebelum page di-close
+    persistAll();
+  });
+
+  // Export fungsi-fungsi yang mungkin dibutuhkan
+  window.saveMaterials = saveMaterials;
+  window.saveHistory = saveHistory;
+  window.loadData = loadData;
+  window.persistAll = persistAll;
+  
+</script>
 
 </script>
 </html>
